@@ -1,0 +1,570 @@
+---
+title: "Write-Up_Taxi-Analysis"
+author: "Steven Chao, Tanaya Kavathekar, Madhuri Yadav, Amna Gul"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide    # black code button
+    fig_height: 4.5
+    fig_width: 7
+    highlight: tango
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_float: true
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(error = F)
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(include = F)
+knitr::opts_chunk$set(warning = F)
+```
+
+```{r basicfcn, include=F}
+# can add quietly=T option to the require() function
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+# This function calculates number of columns with type integer or double
+count_numeric_columns = function(df) { numericc <- 0
+doublec <- 0
+for (col in colnames(df)){
+  # check type integer
+  if (typeof(df[,col]) == "integer"){
+    numericc = numericc + 1
+  }
+  # check type double
+  else {
+    doublec = doublec + 1
+  }
+}
+# create list of the return variables
+  type_list <- list("num" = numericc, "dbl" = doublec) 
+  return(type_list)
+}
+```
+
+```{r load libraries, echo=FALSE}
+# Load libraries
+loadPkg("knitr")
+loadPkg("plyr")
+loadPkg("dplyr")
+loadPkg("ggplot2")
+loadPkg("data.table")
+loadPkg("nortest")
+loadPkg("corrplot")
+```
+
+```{r read data files}
+# Read in sample
+unprocessed_data = read.csv("../Data/trips_zones_20000_v2.csv")
+# Read in taxi zone name data
+taxi_zones <- read.csv("../Data/taxi_zone_lookup.csv")
+```
+
+```{r Drop_columns }
+#colnames(unprocessed_data)
+#create a list of columns that are needed
+cols = c("DOLocationID", "PULocationID", "VendorID", "tpep_pickup_datetime", "tpep_dropoff_datetime", "passenger_count", "trip_distance", "RatecodeID", "payment_type", "fare_amount", "tip_amount", "total_amount")
+#keep only the columns of list created above
+unprocessed_data = subset(unprocessed_data, select = cols )
+#colnames(unprocessed_data)
+```
+
+```{r Tip_ratio}
+# get tip ratio (tip amount to fare amount)
+unprocessed_data['tip_fare_ratio'] = unprocessed_data['tip_amount'] / unprocessed_data['fare_amount']
+# Print standard deviation and amount
+print(sd(unprocessed_data$tip_fare_ratio, na.rm = T))
+print(mean(unprocessed_data$tip_fare_ratio, na.rm = T))
+```
+
+```{r merge location descriptions}
+# Merge taxi zone names to taxi cab data for pick up locations
+unprocessed_data <- merge(x = unprocessed_data, y = taxi_zones, by.x = "PULocationID", by.y = "LocationID", all.x = TRUE)
+# Delete unnecessary columns from merge
+unprocessed_data <- subset(unprocessed_data, select = -c(Zone, service_zone))
+# Change taxi zone name column
+colnames(unprocessed_data)[colnames(unprocessed_data)=="Borough"] <- "Borough_pu"
+# Merge taxi zone names to taxi cab data for drop off locations
+unprocessed_data <- merge(x = unprocessed_data, y = taxi_zones, by.x = "DOLocationID", by.y = "LocationID", all.x = TRUE)
+# Change taxi zone name column
+colnames(unprocessed_data)[colnames(unprocessed_data)=="Borough"] <- "Borough_do"
+```
+
+```{r Pickup_time}
+#Pickup column
+#change factor type to datetime type
+unprocessed_data$pickup_datetime <- as.POSIXct(as.character(unprocessed_data$tpep_pickup_datetime), tz = "", format="%m/%d/%Y %H:%M")
+#extract only the time from datetime type
+unprocessed_data$pickup_time <- format(unprocessed_data$pickup_datetime, format = "%H:%M")
+#extract hours from the time extracted
+unprocessed_data$pickup_hrs <- format(strptime(unprocessed_data$pickup_time,"%H:%M"),'%H')
+#convert hrs column type to numeric
+unprocessed_data$pickup_hrs <- as.numeric(unprocessed_data$pickup_hrs)
+#convert numeric hrs type to pickup period
+unprocessed_data$pickup_period <- ifelse(unprocessed_data$pickup_hrs >= 05 & unprocessed_data$pickup_hrs <= 11, "Morning",
+            ifelse(unprocessed_data$pickup_hrs > 11 & unprocessed_data$pickup_hrs <= 16, "Afternoon",
+            ifelse(unprocessed_data$pickup_hrs > 16 & unprocessed_data$pickup_hrs <= 21, "Evening", "Night")))
+#convert pickup period from string type to factor
+unprocessed_data$pickup_period <- as.factor(unprocessed_data$pickup_period)
+#order the pickup_period column (this is of our interst in further analysis)
+unprocessed_data$pickup_period <- ordered(unprocessed_data$pickup_period, levels = c("Morning", "Afternoon", "Evening", "Night"))
+```
+
+```{r Dropoff_time}
+#Dropoff column
+#change factor type to datetime type
+unprocessed_data$dropoff_datetime <- as.POSIXct(as.character(unprocessed_data$tpep_dropoff_datetime), tz = "", format="%m/%d/%Y %H:%M")
+#extract only the time from datetime type
+unprocessed_data$dropoff_time <- format(unprocessed_data$dropoff_datetime, format = "%H:%M")
+#extract hours from the time extracted
+unprocessed_data$dropoff_hrs <- format(strptime(unprocessed_data$dropoff_time,"%H:%M"),'%H')
+#convert hrs column type to numeric
+unprocessed_data$dropoff_hrs <- as.numeric(unprocessed_data$dropoff_hrs)
+#convert numeric hrs type to drop period
+unprocessed_data$drop_period <- ifelse(unprocessed_data$dropoff_hrs >= 05 & unprocessed_data$dropoff_hrs <= 11, "Morning",
+            ifelse(unprocessed_data$dropoff_hrs > 11 & unprocessed_data$dropoff_hrs <= 16, "Afternoon",
+            ifelse(unprocessed_data$dropoff_hrs > 16 & unprocessed_data$dropoff_hrs <= 21, "Evening", "Night")))
+#convert drop period from string type to factor
+unprocessed_data$drop_period <- as.factor(unprocessed_data$drop_period)
+#order the drop_period column(this is of our interst in further analysis)
+unprocessed_data$drop_period <- ordered(unprocessed_data$drop_period, levels = c("Morning", "Afternoon", "Evening", "Night"))
+```
+
+```{r Trip_duration}
+#Trip_duration
+#calculation of trip duration in minutes = dropoff_time - pickup time
+unprocessed_data$trip_duration <- difftime(unprocessed_data$dropoff_datetime, unprocessed_data$pickup_datetime, units = "mins")
+#conversion of trip duration from minutes to numeric(this is of our interst in further analysis)
+unprocessed_data$trip_duration <- floor(as.numeric(unprocessed_data$trip_duration))
+str(unprocessed_data)
+```
+
+```{r tip-percent-summary2}
+# Print structure
+str(unprocessed_data)
+# Print summary
+summary(unprocessed_data)
+# Print first five rows
+head(unprocessed_data, n = 5)
+```
+
+```{r Outlier detection and missing values}
+# fare amount in negative & credit card payments & trip_distance > 0 & VendorID == 4
+processed_df <- unprocessed_data %>% filter((fare_amount > 0) & (payment_type == 1) &  (passenger_count < 7) & (trip_distance > 0)  & (VendorID != 4) & (trip_duration > 0) & (trip_duration <= 37))
+# removing outliers:
+# tip_fare_ratio laying outside IQR range in box plot
+while (length(boxplot(processed_df$tip_fare_ratio)$out) != 0){
+  dim(processed_df)
+  tip_fare_ratio_outliers <- boxplot(processed_df$tip_fare_ratio, col = c("#0000FF"))
+  processed_df <- processed_df[ !processed_df$tip_fare_ratio %in% tip_fare_ratio_outliers$out,]
+  dim(processed_df)
+}
+```
+
+
+# Introduction
+
+Taxicabs are an integral part of the New York City (NYC) experience. Widely recognized by their yellow color and checkered boxes, there are roughly 13,500 taxicabs in service today, worth about $800,000 each, with 50,000 drivers serving 236 million passengers per year (Devaraj & Patel, 2007).
+
+Our study looks at what affects the amount of tip paid to the driver. This is relevant for a few reasons. Tips are an important part of the service industry, which includes taxicab drivers (Devaraj & Patel, 2017; Azar, 2007; Azar, 2010; Lynn, 2006; Flynn & Greenberg, 2012). In general, tips average around 15% and generate billions of dollars each year (Azar, 2007). Thus, knowing the likelihood and the amount of tips have the potential to provide greater financial certainty for workers. In addition, despite New York law preventing taxicab drivers from refusing service, service refusal still happens (New York City Taxi and Limousine Commission, n.d.; Rivoli & Jorgensen, 2018). It is possible that drivers making assumptions about how likely a customer is to tip (Ayres, Vars, & Zakariya, 2005). Finally, taxicab data can also provide valuable information on city life, city culture, human behavior, and various socioeconomic variables such as economic activity (Ferreira, Poco, Vo, Freire, & Silva, 2013).
+
+# Literature Review
+
+Tips can be defined as voluntary payments—in addition to the obligatory transaction amount—usually in the form of money from the customer to service worker who performs a service for them (Devaraj & Patel, 2017). There has been substantial research done on tipping in the restaurant industry, mostly through empirical studies (Azar, 2007).
+
+Tipping behavior can be explained by both economic and noneconomic factors (Devaraj & Patel, 2007). Economic reasons for tipping include providing an economic incentive for a higher quality of service (Flath, 2012) and wealth--although there are varying viewpoints amongst customers and waiters about the effect of a customer’s wealth on tip amount (Harris, 1995). Noneconomic factors include the idea of tipping being a social norm, where not tipping can cause a customer to feel guilty or embarrassed and where tipping can lead to positive feelings (Azar, 2010). Furthermore, tipping is also influenced by the fact that some customers recognize that their servers depend on tips to supplement their income.
+
+Finally, gratitude or appreciation of service was cited as a reason (Azar, 2010). The extent to which the quality of service, however, affects the tip amount is unclear. Through interviews, Lynn (2001) found that service quality greatly affects a customer’s decision to tip. Alternatively, Azar (2007) stresses the need to consider what is said during an interview versus what a customer actually does. While a customer may in principle agree with the fact that tips should depend on the quality of service, in an actual situation, the social norm of tipping may take precedence over that principle.
+
+Another point of disagreement amongst researchers is the effect of weather on tip amounts. Flynn and Greenberg (2012) found that there is no statistically significant relationship between the two variables. They instead argue that tipping is a deeply embedded social norm not subject to changes in weather.
+
+## Taxicab Tipping
+
+There exists a paucity of research on tipping in other industries, such as hotel and transportation (Azar, 2007; Devaraj & Patel, 2017). Devaraj and Patel (2017) argue that the factors previously discussed have less influence in a taxi setting given the standardized nature of the taxicab service and the minimal interaction between the driver and the passengers. Flath (2012) agrees, adding that the quality of the taxi service is not dependent on the driver.
+
+Various factors have been claimed to affect taxicab tipping. For instance, Devaraj and Patel (2017), who used NYC taxicab datasets, argue that taxicab tipping is associated with weather. While the relationship is small, it is statistically significant: The sunnier the weather, the greater amount of tipping. Moreover, Ayres et al. (2005) find that there is a racial disrimination in tipping. Conducting their study in New Hampshire, the researchers observed that African-American drivers often received one-third of the tip received by white drivers. They also find that African-American and Hispanic passengers also tended to tip less than their white counterparts. They conclude by hypothesizing that this may be more of an indicator of wealth.
+
+## Previous NYC Taxicab Data Analysis
+
+Other non-tipping work related to the NYC dataset have been conducted, especially in regards to location, For example, Zhan, Hasan, Ukkusuri, and Kamga (2013) used the dataset to estimate potential travel times between a pick up and drop off location. Neutens, Delafontaine, Scott, and De Maeyer (2012) used the dataset to conduct a spatio-temporal analysis of taxi trips in New York City. The authors designed and introduced a new system that enables users to visualize taxi trips based on pick up and drop off locations.
+
+Work has also been conducted in relation to supply and demand. Qian and Ukkusuri (2015) conducted a geographically-weighted regression on the dataset and find that commuting time is negatively related to taxi ridership, whereas subway accessibility is positively correlated to it. While they acknowledge that people with higher incomes theoretically are more able to afford taxis, they note the effect of median income varies by geographical location. Gonzales, Yang, Morgul, and Ozbay (2014) attempted to use socioeconomic data in conjunction with the taxicab dataset to model taxi demand, in particular from the NYC airports. Similar to Qian and Ukkusuri (2015), they conclude that accessibility, income, population, age, and number of jobs were strongly related to demand. Finally, Sun and McIntosh (2016) discover that taxicab ridership is lowest in the early mornings and the highest in the evenings. They also note that for short distances, trip time, distance, and fare are all linearly related; however, this relationship grows weaker at greater distances due to the influence of other potential factors.
+
+## Relationship to Current Project
+
+
+In this context, given the lack of research in taxicab tipping, this project seeks to address the gap in research by identifying if there are other factors other than weather that may affect the amount of tipping by those who paid their fares by credit card. In other words, if weather has the potential to affect behavior for tipping in taxicabs (Devaraj & Patel, 2017), there may be other factors, such as socio-economic variables, that may affect a person’s behavior and thus the amount they choose to tip. Focusing on the variables provided in the NYC taxicab dataset is beneficial because those variables are the ones the drivers “interact” with; they cannot see wealth or know a passenger’s background, but they can make inferences (and subsequently guess tip amount) based on appearances and their pick up and drop off locations (Ayres et al., 2005).
+
+As the literature review suggests, the provided dataset may provide some proxies for socio-economic variables. For instance, pick up and drop off locations may provide some context into a passenger's background for two main reasons. First, passengers may use taxis to go from home to work and from work to home (Lee, Shin, & Park, 2008). Location can thereby impact the amount of tipping; each location has its own set of customs and traditions and socioeconomic variables that affect tipping (Lynn, 2006). In this context, a person's wealth may also impact the amount that he or she tips to the taxi driver. While most of this analysis was done on a larger, regional scale, given the distinct cultures of each borough in New York, there may be microcosms of tipping culture found in the city that differ between each borough. Secondly, each individual has their own time-space geography. Some geographers have argued that people's time-spaces are often segregated--whether by gender or race--which can affect their access to resources (Kwan, 1999; Neutens et al. 2012; van Ham & Tammaru, 2015). Therefore, this may provide some context into how an individual lives and their background.
+
+# Dataset Description
+
+Now we are going to share the original source from where data was gathered, along with a brief summary of what is contained inside this data set.
+
+## Dataset Source
+
+The source dataset used for the project was taken from the New York City Taxi and Limousine Commission (2019) website, which is an official NYC government webpage (https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page).
+
+The New York City Taxi and Limousine Commission (TLC), was created in 1971. The agency is responsible for licensing and regulating New York City's Medallion (Yellow) taxi cabs, for-hire vehicles (community-based liveries, black cars and luxury limousines), commuter vans, and paratransit vehicles. The datasets were collected and provided to the agency by technology providers authorized under the Taxicab & Livery Passenger Enhancement Programs (TPEP/LPEP). 
+  
+The dataset is available for Yellow Taxi, Green Taxi and For-Hire Vehicle Records from 2009 to 2019. The total size of the complete dataset is over 10 GB. We have randomly sampled and selected 20,000 observations from the latest dataset, 2019 June from Yellow Taxi Records (New York City Taxi and Limousine Commission, 2019), due to hardware limitations. The dataset also comes with an associated data dictionary for download (New York City Taxi and Limousine Commission, 2018).
+
+## About the Dataset
+
+Before preprocessing the number of rows and columns is: `r nrow(unprocessed_data)`,`r ncol(unprocessed_data)`.
+
+Below is the summary of the random sampled dataset:
+
+```{r Summary_of_the_unprocessed_data, echo=F, include=T}
+# Get summary of data
+
+#data types of the columns
+kable(t(sapply(unprocessed_data,class)))
+unprocessed_data <- na.omit(unprocessed_data)
+
+#Mean Median Min Max Mode of numeric columns
+summary1<- data.frame("Min" = t(unprocessed_data %>% summarise_if(is.numeric, min)), "Mean" = t(unprocessed_data %>% summarise_if(is.numeric, mean)), "Median" = t(unprocessed_data %>% summarise_if(is.numeric, median)), "Max" = t(unprocessed_data %>% summarise_if(is.numeric, max)))
+
+kable(summary1)
+
+```
+  
+The description of the columns of dataset is [here](https://github.com/Tann10/Taxi-Analysis/blob/master/Data/Data_Dictionary.xlsx).
+
+# Data Pre-Processing
+
+Now that we have had a glimpse of our data set, next step is to clean it for drawing accurate conclusions. These are the steps that we followed:
+
+## Normality check
+
+Below is the QQ plot for the normality check of the dependent variable i.e. tip amount.
+
+```{r tipamount_distr, echo=F, include=T}
+# Create qqplot
+ggplot(unprocessed_data, aes(sample = tip_amount)) + 
+  stat_qq() + 
+  stat_qq_line() +
+  ggtitle("QQ plot for tip amount") 
+```
+
+
+Looking at the distribution of raw tip amount, it is clear that it is not normally distributed and that there are some outliers. Generally. raw tip amounts vary because the fare amounts vary. One factor that may not necessarily vary is tipping percentage. In the US, 15% is the tipping standard (Azar, 2007). As the data is not normally distributed, a ratio of tip amount to the fare amount was calculated and used as a dependent variable (hereinafter referred to as "tip ratio" or "tip-fare ratio").
+
+## Outlier detection and treatment
+
+Below is the boxplot of the tip amount which we are interested in for our analysis:
+
+
+```{r unprocessed tip amount boxplot, echo=F, include=T}
+# Create boxplot of NYC taxi tip amount
+ggplot(data = unprocessed_data, aes(x = "", y = tip_amount)) + 
+  geom_boxplot(color="#00AFBB")+ stat_summary(fun.y=mean, geom="point", shape=23, size=4) + 
+  labs(x=" ", y = "Tip amount (dollars)") + ggtitle("Boxplot of NYC Taxi Tip Amount")
+```
+
+It is vital to remove outliers from the data to get reliable results. The following filters are applied on the data set:
+  
+1. VendorID = Data has vendor id 4, but according to the data dictionary only 1 and 2 should be present.
+
+2. payment type = Only credit card details have corresponding tip amount value. Hence we will analysing only credit card payment types
+
+3. fare_amount = Data has negative fare amount, such entries are outliers hence removed
+
+4. passenger count = According to the law maximum 7 passengers are allowed in a taxi
+
+5. trip distance = there are some observation with 0 trip distance, maybe a cancelled taxi. These observations are not considered for the analysis
+
+6. trip duration = the values >=37 and <=0 fall outside the boxplot. These are removed.
+Using the boxplot, we removed the outliers from the dataset. 
+
+Apart from this data lying outside the interquantile range for ratio of tip to the fare amount was removed. Below is the histogram of the NYC taxi data ratio of tip after the removal of outliers.
+
+```{r normality check of processed data, echo=T, include=T}
+#ggplot histogram of tip_fare_ratio for processed df
+processed_df %>%
+  ggplot(aes(tip_fare_ratio)) +
+  geom_histogram(aes(y =..density..),  colour = "black", fill = "#66B2FF", binwidth = 0.01) + 
+  stat_function(fun = dnorm, args = list(mean = mean(processed_df$tip_fare_ratio), sd = sd(processed_df$tip_fare_ratio))) + ggtitle("Distribution of NYC Taxi Tip Data Post-Outlier Removal") + xlab("Tip Ratio")
+```
+
+Now the data is approximately normally distributed ready to use for analysis. There are lesser points on the left side of the mean.
+  
+Below is the summary of the processed data:
+
+```{r Summary_of_processed_data, echo=F, include=T}
+# Get summary of data
+
+#data types of the columns
+kable(t(sapply(processed_df,class)))
+
+#Mean Median Min Max Mode of numeric columns
+summary2<- data.frame("Min" = t(processed_df %>% summarise_if(is.numeric, min)), "Mean" = t(processed_df %>% summarise_if(is.numeric, mean)), "Median" = t(processed_df %>% summarise_if(is.numeric, median)), "Max" = t(processed_df %>% summarise_if(is.numeric, max)))
+
+kable(summary2)
+
+```
+
+
+The description of the columns of dataset is [here](https://github.com/Tann10/Taxi-Analysis/blob/master/Data/Data_Dictionary_After_Processing.xlsx).
+  
+To summarize, after preprocessing the number of rows and columns are : `r nrow(processed_df)`, `r ncol(processed_df)`
+
+After checking normality and treating outliers, the scope of the initial question was changed to analysing if factors such as location, duration, passenger count and time of the day affect the ratio of the tip amount and the fare amount paid by credit card.
+
+
+## Correlation Coefficients 
+```{r corr, echo=F, include=F}
+# finding correlation between tip amount & distance travelled
+corr_dist <- cor(processed_df$tip_fare_ratio, processed_df$trip_distance, method="pearson") 
+corr_dur <- cor(processed_df$tip_fare_ratio, processed_df$trip_duration, method="pearson") 
+```
+For our continuous variables, that is trip distance and trip duration, first we try to find correlation coefficients to determine if they are related to tip ratio. Values obtained are `r format(corr_dist, digits=3)` and `r format(corr_dur, digits=3)` respectively, which implies a weak downhill (negative) relationship. The same can be confirmed from scatter plot below.
+
+Since correlation does not mean causation we need to apply statistical tests on these variables to determine if they are related.
+
+```{r scatterplot, echo=F, include=T, message=FALSE, warning=FALSE }
+p1 <- ggplot() +
+      # blue plot tip ratio vs trip distance
+      geom_point(data=processed_df, aes(x=trip_distance, y=tip_fare_ratio)) + 
+      geom_smooth(data=processed_df, aes(x=trip_distance, y=tip_fare_ratio), fill="blue",
+        colour="darkblue", size=1) + ggtitle("Scatterplot for Distance") + xlab("Trip Distance (miles)") + ylab("Tip Ratio")
+
+# red plot tip ratio vs trip duration
+p2 <- ggplot() +    
+      geom_point(data=processed_df, aes(x=trip_duration, y=tip_fare_ratio)) + 
+      geom_smooth(data=processed_df, aes(x=trip_duration, y=tip_fare_ratio), fill="red",
+        colour="red", size=1) + ggtitle("Scatterplot for Duration") + xlab("Trip Duration (minutes)") + ylab("Tip Ratio")
+require(gridExtra)    # plotting for 2 graphs side by side
+grid.arrange(p1, p2)
+
+
+
+# Run ANOVA
+anova_pickup_period <- aov(tip_fare_ratio ~ pickup_period, data = processed_df)
+# Run ANOVA
+anova_drop_period <- aov(tip_fare_ratio ~ drop_period, data = processed_df)
+#Run T-test
+trip_duration_ttest <- t.test(processed_df$tip_fare_ratio, processed_df$trip_duration)
+
+```
+
+# Feature Analysis
+
+In this section, we analyze various factors shortlisted from our data set that may affect the tipping amount paid to the cab drivers.
+
+
+## Trip location
+
+```{r anova_tipratio_location}
+# Run ANOVA
+anova_tiprat_pu <- aov(tip_fare_ratio ~ Borough_pu, data = processed_df)
+
+# Print ANOVA results
+anova_tiprat_pu
+
+# Run ANOVA
+anova_tiprat_do <- aov(tip_fare_ratio ~ Borough_do, data = processed_df)
+
+# Print ANOVA results
+anova_tiprat_do
+```
+
+For tip ratio and location, after running the analysis of variance (ANOVA) test, we reject the null hypothesis that the means are the same and say the means are statistically different at a significance level of 0.05 (the p-values are `r format(summary(anova_tiprat_pu)[[1]][["Pr(>F)"]][[1]], digits=3)` and `r format(summary(anova_tiprat_do)[[1]][["Pr(>F)"]][[1]], digits=3)` for pickup and dropoff locations, respectively). While the means are overall not the same, the following pick up pairs have significant differences in tipping ratio after running the Tukey HSD test: Manhattan and Brooklyn, and Queens and Manhattan. For drop off pairs, Manhattan and Bronx, Manhattan and Brooklyn, and Manhattan and Queens are significant. The graphs for tip ratio and location are shown below:
+
+```{r tipratio_plot, include = T, echo = F}
+# Plot tip ratio by pickup location
+ggplot(data = processed_df, aes(x = Borough_pu, y = tip_fare_ratio, fill = Borough_pu)) + ggtitle("Tip Ratio by Pickup Location") + geom_boxplot() + xlab("Location") + ylab("Tip Ratio")
+# Plot tip ratio by dropoff location
+ggplot(data = processed_df, aes(x = Borough_do, y = tip_fare_ratio, fill = Borough_do)) + ggtitle("Tip Ratio by Dropoff Location") + geom_boxplot() + xlab("Location") + ylab("Tip Ratio")
+```
+
+## Trip distance
+
+While trying to find the the variation in tip-fare ratio between short distance (less than 2.4 miles) and long distance (greater than 2.4 miles) commuters of NYC yellow cabs, results (box plot below) obtained tell us that short distance travellers pay larger share of tips relative to their overall fare than those who travel longer distances within NYC radius. 
+
+This tipping behaviour might happen because of psychological reasons e.g. passengers whose average fare amount sums up to $10-$15 would feel guilt-ridden if they pay less than $2-$3 in tips. On the other hand, those passengers who are already paying high fare amounts, such as $25-$30 per commute, would not feel that bad paying the same amount of tip just to cut down their costs. However, this is just a hypothesis; there might be a variety of other reasons affecting this particular behaviour, as discussed in our literature review (Sun & McIntosh, 2016). 
+
+```{r dist_code}
+# Subset data 
+df_dist <- subset(processed_df, select=c(tip_fare_ratio, trip_distance))
+
+# converting trip_distance col from numerical to factor type for performing 2-sample t-test
+factor_dist <- cut(df_dist$trip_distance, breaks=c(0, mean(df_dist$trip_distance), Inf), labels= c("Shorter Distances","Longer Distances"), 1:2, sep="")
+
+df_dist$trip_distance <- factor_dist   # assigning factored col to the original df
+
+# Subset data
+short_dist <- subset(df_dist, df_dist$trip_distance == "Shorter Distances")
+str(short_dist)
+long_dist <- subset(df_dist, df_dist$trip_distance == "Longer Distances")
+str(long_dist)
+# Applying 2 Sample t-test below
+result_t <- t.test(short_dist$tip_fare_ratio, long_dist$tip_fare_ratio)
+# result_t$p.value
+```
+
+```{r box_plot_dist, include = T, echo = F}
+# get summary
+# summary(processed_df$trip_distance)
+
+# box-plot to see who pays more tips 
+e <- ggplot(data = df_dist, aes(x = trip_distance, y = tip_fare_ratio, fill=trip_distance)) + 
+  geom_boxplot()+ stat_summary(fun.y=mean, geom="point", shape=23, size=4) + 
+  labs(x="Distance Travelled", y = "Tip-Fare Ratio") + ggtitle("Box Plot for Tip paid vs Distance Travelled")
+e
+
+```
+
+Now that our dataset is fully understood after performing the EDA, we know exactly what anomalies were present in our data set, which allowed us to frame our hypothesis accordingly and figure out the feautures most relevant to our scope of analysis. Now the next step is to find a good fitting model (if one exists).
+
+## Trip duration
+For tip ratio and time period, after running the ANOVA test, we reject the null hypothesis that the means are statistically different at a significance level of 0.05. The graphs for tip ratio versus time period are shown below:
+```{r time period_plot, include = T, echo = F}
+# Tip Ratio vs Pickup Time Period
+ggplot(data = processed_df, aes(x = pickup_period, y = tip_fare_ratio, fill = pickup_period)) + ggtitle("Tip Ratio vs Pickup Time Period") + geom_boxplot() + xlab("Time Period") + ylab("Tip Ratio")
+# Plot tip percentage by Dropoff_Time
+ggplot(data = processed_df, aes(x = drop_period, y = tip_fare_ratio, fill = drop_period)) + ggtitle("Tip Ratio vs Dropoff Time Period") + geom_boxplot() + xlab("Time Period") + ylab("Tip Ratio")
+```
+
+## Number of passenger and vendor ID
+
+We hyothesize that there is a relationship between the number of passenger in the car and the tip ratio The passenger count varies from 0 to 6.
+
+```{r hypothesis testing for passenger count and vendor, echo=F,  include=T}
+# Create factor data
+processed_df$passenger_count <- as.factor(processed_df$passenger_count)
+
+# Create boxplot
+processed_df %>%
+  ggplot(aes(passenger_count, tip_fare_ratio, fill = passenger_count)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(y = "Tip ratio", x = "Number of passengers") + 
+  ggtitle("Box plot distribution for ratio of tip amount and passenger count")
+```
+
+```{r anova test for passenger_count}
+
+# ANOVA test
+anova_tip_amount = aov(tip_fare_ratio ~ passenger_count, data = processed_df)
+summary(anova_tip_amount)
+
+```
+The mean of all the groups of passenger count does not vary much. Also, the output of ANOVA gives the p-value `r format(summary(anova_tip_amount)[[1]][["Pr(>F)"]][1], digits=3)` which is > 0.05, hence we fail to reject null hypothesis. This means that the number of passenger in the car does not affect ratio of the tip amount.
+
+```{r t test for vendor ID}
+# Create factor
+processed_df$VendorID <- as.factor(processed_df$VendorID)
+
+# t test for vendor
+ttest_vendor = t.test(tip_fare_ratio ~ VendorID, data = processed_df)
+ttest_vendor
+```
+
+Similarly, we check the distribution for the vendor ID and run a t-test to check the results. The p-value `r format(ttest_vendor$p.value, digits=3)` is less than 0.05; hence we reject null hypothesis and conclude that the vendor does affect tip amount.
+
+# Conclusion
+
+We can summarize our results in this table:
+
+Feature (variable)  |  Test  |  P-value  | Null Hypothesis (H0)  | Decision on H0 |  
+-----|-----|-----|--------|--------|  
+pickup location | ANOVA | `r format(summary(anova_tiprat_pu)[[1]][["Pr(>F)"]][[1]], digits=3)` | means are equal | reject H0 |  
+dropoff location | ANOVA | `r format(summary(anova_tiprat_do)[[1]][["Pr(>F)"]][[1]], digits=3)` | means are equal | reject H0 |  
+distance | T-Test | `r format(result_t$p.value, digits=3)` | means are equal | reject H0 |  
+pickup time | ANOVA | `r format(summary(anova_pickup_period)[[1]][["Pr(>F)"]][[1]], digits=3)` | means are equal | reject H0 |
+dropoff time | ANOVA | `r format(summary(anova_drop_period)[[1]][["Pr(>F)"]][[1]], digits=3)` | means are equal | reject H0 |
+passenger count | ANOVA | `r format(summary(anova_tip_amount)[[1]][["Pr(>F)"]][1], digits=3)` | means are equal | fail to reject H0 |
+vendor ID | T-test | `r format(ttest_vendor$p.value, digits=3)` | means are equal | reject H0 | 
+
+*based on a significance level of 0.05
+
+Based on our literature, where different factors come into play for longer taxicab trips, and our analysis, which reveals that tip ratio is lower for longer trips, there may be a nonlinear relationship. We could potentially use a random forest classifier (which works with categorical data) to build a model and test how well that model would perform.
+
+Linear regression; look at pearson correlation; then build linear model
+
+
+Based on our EDA, we can begin to sketch out an answer to our question: It appears that the following variables affect the tip ratio for those who paid by credit card: pickup loation, dropoff location, distance travelled in miles, time of day. In this context, we can incorporate these variables into our future analysis. We can conduct a linear regression analysis--which allows for the independent (x) variable to be either categorical or continuous--on each individual variable and with all relevant variables combined (i.e. such as through the use of interaction terms) to see how they affect the tip ratio.
+
+Based on our literature, where different factors come into play for longer taxicab trips, and our analysis, which reveals that tip ratio is lower for longer trips, there may be a nonlinear relationship. We could potentially use a random forest classifier (which appears to work with categorical data) to build a model and test how well that model would perform.
+
+# Additional Information
+
+After completion of our analysis we would like to mention some constraints and their implications, along with additions to the data set which would have led to more reliable results.
+
+## Dataset Limitations
+
+Like every other data set, our data has also some limitations that may impact the results of our study.
+<ul>
+  <li>Hardware Limitations: The data that is publicly made available by the NYC Taxi and Limousine Commission dates back to only ten years. Initially we tried to incorporate all of this data for statistical testing, but it was too large to be tested on our personal computers. Even data for a single year exceeded 10 GB, causing our machines to crash or hang when trying to run it in R; thus we narrowed it down to just 20,000 observations from June 2019 for yellow taxi tip records (the latest available data). Since our observations span only a short period of time, the results obtained from our research can not be generalized for longer period of times.
+  <li>Non-Normality of Tipping data: Normally distributed data is a basic requirement when it comes to applying statistical tools, t-tests and the ANOVA etc. Our dependent variable i.e. Amount tipped is not exactly normally distributed. So we tried to address this issue in the following ways:
+    <ul>
+      <li>Removing extreme values and outliers that were causing our distribution to be abnormally skewed.
+      <li>Central Limit Theorem (CLT) states that sample means of moderately large samples are often well-approximated by a normal distribution even if the data is not normally distributed. Our dataset contains a significant amount of observations thus qualifying it to be approximately normal under CLT. 
+    </ul>
+  <li>No Cash Tip data provided: The data available contains tip amounts paid through credit card mode only. There might be observations where Tip amount column contains a value of zero when in reality the driver of cab was presented with tip in cash mode, but since it was not recorded in data collected by TLC we cannot be sure, consequently rendering our data to be incomplete. 
+  <li>Limited Time and resources: We chose to work on only four features affecting the variation in the tipping ratio, but there could be a plethora of other reasons too. For example, weather (Devaraj & Patel, 2007): A bright sunny and breezy day would encourage short distance commuters to walk to their destinations instead of using cab service altogether or it might positively impact the mood of the taxi passengers inclining them to tip more. However, limited time restricted us to work only on few of data points available.
+  <li>Human Errors in Data set: Some of the columns in our data set are prone to human errors. For example, passenger count (the number of passengers in the vehicle) is driver entered value and  might have the potential of some observations being inaccurately recorded.
+</ul>
+
+## Potential Future Work / Additional Data
+
+The results obtained by our team can be significantly improved and made more reliable if we were able to gather more features to consider (some of which were discussed in our literature review). For instance:
+<ul>
+  <li>Driver ratings: If TLC was able to gather data on how well-rated each Yellow Cab driver is in NYC based on feedback provided by passenger(s). This rating system itself could involve various factors such as cleanliness level of vehicle interior, friendliness/politeness level of driver, thus allowing us to find the correlation between amount tipped to good-rated drivers versus poorly-rated drivers.
+  <li>Weather data: Common sense tells us that rainy or snowy weather is going to encourage more people to opt for cab hailing services than on normal days. From that data, we could have applied statistical techniques to infer whether the change in season also affects the tipping behavior of the passengers or not. 
+  <li>Geographical Coordinates: The availability of geographical coordinates data would have led us to not only pinpoint the exact localities/neighborhoods to figure out the tipping intention based on different demographics but also project this data in the form of visually appealing maps.
+  <li>Gender Dynamics, Personality type, Mood: These factors due to their qualitative nature receive limited attention as predictor of tipping behavior, but we believe that can also serve to play an important part in tipping behavior.
+</ul>
+
+
+# References
+
+Ayres, I., Vars, F. E., & Zakariya, N. (2005). To insure prejudice: Racial disparities in taxicab tipping. <i>Yale Law Journal, 114</i>, 1613–1674. doi: 10.2139/ssrn.401201
+
+Azar, O. H. (2007). The social norm of tipping: A review. <i>Journal of Applied Social Psychology, 37</i>(2), 380–402. doi: 10.1111/j.0021-9029.2007.00165.x
+
+Azar, O. H. (2010). Tipping motivations and behavior in the U.S. and Israel. <i>Journal of Applied Social Psychology, 40</i>(2), 421–457. doi: 10.1111/j.1559-1816.2009.00581.x
+
+Devaraj, S., & Patel, P. C. (2017). Taxicab tipping and sunlight. <i>PLoS One, 12</i>(6). doi: 10.1371/journal.pone.0179193
+
+Ferreira, N., Poco, J., Vo, H. T., Freire, J., & Silva, C. T. (2013). Visual exploration of big spatio-temporal urban data: A study of New York City taxi trips. <i>IEEE Transactions on Visualization and Computer Graphics, 19</i>(12), 2149–2158. doi: 10.1109/TVCG.2013.226
+
+Flath, D. (2012). Why do we tip taxicab drivers? <i>Japanese Economy, 39</i>(3), 69–76. doi: 10.2753/JES1097-203X390304
+
+Flynn, S. M., & Greenberg, A. E. (2012). Does weather actually affect tipping? An empirical analysis of time-series data. <i>Journal of Applied Social Psychology 42</i>(3), 702–716. doi: 10.2139/ssrn.1617465
+
+Gonzales, E. J., Yang, C., Morgul, E. F., & Ozbay, K. (2014). <i>Modeling taxi demand with GPS data from taxis and transit.</i> Mineta National Transit Research Consortium. Retrieved from https://transweb.sjsu.edu/sites/default/files/1141-modeling-taxi-demand-gps-transit-data.pdf.
+
+Harris, M. B. (1995). Waiters, customers, and service: Some tips about tipping. <i>Journal of Applied Social Psychology, 25</i>(8), 725–744. doi: 10.1111/j.1559-1816.1995.tb01771.x
+
+Kwan, M. (1999). Gender and individual access to urban opportunities: A study using space–time measures. <i>The Professional Geographer, 51</i>, 211–227. doi: 10.1111/0033-0124.00158
+
+Lee, J., Shin, I., & Park, G. (2008). Analysis of the passenger pick-up pattern for taxi location recommendation. <i>2008 Fourth International Conference on Networked Computing and Advanced Information Management.</i> doi: 10.1109/NCM.2008.24
+
+Lynn, M. (2001). Restaurant tipping and service quality: A tenuous relationship. <i>The Cornell Hotel and Restaurant Administration Quarterly, 42</i>(1), 14–20. doi: 10.1016/s0010-8804(01)90006-0
+
+
+Lynn, M. (2006). Tipping in restaurants and around the globe: An interdisciplinary review. <i>Handbook of Contemporary Behavioral Economics: Foundations and Developments.</i> Retrieved from https://ssrn.com/abstract=465942.
+
+New York City Taxi and Limousine Commission. (n.d.). Passenger frequently asked questions. Retrieved October 14, 2019, from https://www1.nyc.gov/site/tlc/passengers/passenger-frequently-asked-questions.page.
+
+New York City Taxi and Limousine Commission. (2018, May 1). Data dictionary - Yellow taxi trip records. Retrieved October 14, 2019, from https://www1.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf.
+
+New York City Taxi and Limousine Commission. (2019). Yellow taxi trip records, June 2019 [Data set]. Retrieved from https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page.
+
+Neutens, T., Delafontaine, M., Scott, D. M., & De Maeyer, P. (2012). An analysis of day-to-day variations in individual space-time accessibility. <i>Journal of Transport Geography, 23</i>, 81–91. doi: 10.1016/j.jtrangeo.2012.04.001
+
+Qian, X., & Ukkusuri, S. (2015). Spatial variation of the urban taxi ridership using GPS data. <i>Applied Geography, 59</i>, 31–42. doi: 10.1016/j.apgeog.2015.02.011
+
+Rivoli, D., & Jorgensen, J. (2018, July 31). City vows to crack down on taxis refusing service as it also looks to cap Uber. Retrieved October 14, 2019, from https://www.nydailynews.com/news/politics/ny-pol-tax-uber-refuse-service-20180731-story.html.
+
+Sun, H., & McIntosh, S. (2016). Big data mobile services for new york city taxi riders and drivers. <i>2016 IEEE International Conference on Mobile Services,</i> 57–64. doi: 10.1109/MoSb.2S0e1r6v.128016.19
+
+van Ham, M., & Tammaru, T. (2015). New perspectives on ethnic segregation over time and space. A domains approach. <i>Urban Geography, 37</i>(7), 953–962. doi: 10.1080/02723638.2016.1142152
+
+Zhan, X., Hasan, S., Ukkusuri, S., & Kamga, C. (2013). Urban link travel time estimation using large-scale taxi data with partial information. Transportation Research Part C, 33, 37–49. doi: 10.1016/j.trc.2013.04.001
+

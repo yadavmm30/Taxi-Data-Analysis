@@ -1,0 +1,128 @@
+---
+title: "Project"
+author: "Steven Chao"
+date: "10/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r basicfcn, include=F}
+# can add quietly=T option to the require() function
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+```
+
+## R Markdown
+
+```{r}
+
+#taxi_trips <- read.csv("yellow_tripdata_2019-06.csv")
+
+#trips_zones <- trips_zones_full[sample(nrow(trips_zones_full), 20000, replace = F, prob = NULL),]
+
+# https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+#taxi_zones <- read.csv("taxi_zone_lookup.csv")
+
+#trips_zones <- merge(x = taxi_trips, y = taxi_zones, by.x = "PULocationID", by.y = "LocationID", all.x = TRUE)
+
+#trips_zones <- subset(trips_zones, select = -c(Zone,service_zone))
+
+#colnames(trips_zones)[colnames(trips_zones)=="Borough"] <- "Borough_pu"
+
+#trips_zones <- merge(x = trips_zones, y = taxi_zones, by.x = "DOLocationID", by.y = "LocationID", all.x = TRUE)
+#colnames(trips_zones)[colnames(trips_zones)=="Borough"] <- "Borough_do"
+```
+
+``` {r}
+
+trips_zones <- read.csv("../Data/trips_zones_20000.csv")
+tz_boxplot <- boxplot(trips_zones$tip_amount, col = c("#0000FF"))
+
+trips_zones <- trips_zones[ ! trips_zones$tip_amount %in% tz_boxplot$out, ]
+
+trips_zones <- subset(trips_zones, payment_type == 1)
+
+str(trips_zones)
+
+head(trips_zones, n = 5)
+
+# Summary
+summary(trips_zones)
+
+summary(trips_zones$tip_amount)
+
+# Descriptive stats
+# Mean, median, s.d., min, max, quartiles, outliers
+mean_tip = mean(trips_zones$tip_amount)
+median_tip = median(trips_zones$tip_amount)
+min_tip = min(trips_zones$tip_amount)
+max_tip = max(trips_zones$tip_amount)
+
+tip_quartiles <- quantile(trips_zones$tip_amount, c(0.25, 0.5, 0.75), type = 7)
+```
+
+```{r}
+
+# Grapical representations
+# Bar chart by location
+# Box whisker plot for tip
+
+tz_boxplot <- boxplot(trips_zones$tip_amount, col = c("#0000FF"))
+tz_boxplot
+
+hist(trips_zones$tip_amount, main="Title", col="green")
+```
+
+```{r}
+# Load package
+loadPkg("ggplot2")
+
+# Create scatter plot with title
+ggplot(data = trips_zones) + geom_point(mapping = aes(x = fare_amount, y = tip_amount, color = payment_type)) + ggtitle("Title")
+
+# Variance and std Deviation (plus range)
+tip_range <- max_tip - min_tip
+var(trips_zones$tip_amount)
+sd(trips_zones$tip_amount)
+
+# Normality test
+qqnorm(trips_zones$tip_amount)
+qqline(trips_zones$tip_amount)
+
+```
+```{r}
+
+# ANOVA
+# Box plot for tip vs locations
+
+# Run ANOVA
+anova_location <- aov(tip_amount ~ Borough_pu, data = trips_zones)
+
+# Print ANOVA results
+anova_location
+
+# Summarize ANOVA
+summary(anova_location)
+
+# Plot rankings vs GRE
+plot(tip_amount ~ Borough_pu, data = trips_zones, main = "Title", xlab = "x", ylab = "y")
+
+tukey_anova_location <- TukeyHSD(anova_location, conf.level = 0.95)
+
+tukey_anova_location
+```
+
+```{r}
+# T test, test if this is representative of entire united states
+ttest_tip_95 <- t.test(trips_zones$tip_amount, conf.level = 0.95)
+
+ttest_tip_95
+
+# Subset by borough and run t test on each for tip amount, could also a box plot series for each borough grouped by payment type
+# Or subset by payment type and do box plot series for each payment type grouped by borough
+
+#The T-interval on GRE is [`r format(ttest80_gre$conf.int,digits=4)`] at 0.80 confidence level and [`r format(ttest99_gre$conf.int,digits=4)`] at 0.99 confidence level.
+#plot(rejected$rank, rejected$gpa, main="Rejected Students GPA from Different Ranks", ylab="GPA (out of 4.0)", xlab="Student Undergrad School Ranking", col=c("#ff0000","#00ff00","#0000ff","#ffff00") )
+```

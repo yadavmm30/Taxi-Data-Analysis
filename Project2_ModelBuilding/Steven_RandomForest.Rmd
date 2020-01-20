@@ -1,0 +1,49 @@
+---
+title: "Steven_RandomForest"
+author: "Steven Chao"
+date: "11/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r basicfcn}
+# can add quietly=T option to the require() function
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+```
+
+```{r}
+taxi <- read.csv("../Data/taxidata_processed_project2.csv")
+
+taxi_subset <- subset(taxi, select = c(passenger_count, trip_distance, fare_amount, tip_fare_ratio, Borough_pu, Borough_do, pickup_period, drop_period, trip_duration))
+
+taxi_subset <- subset(taxi, select = c(passenger_count, trip_distance, fare_amount, tip_fare_ratio, trip_duration))
+
+taxi_subset <- as.data.frame(scale(taxi_subset[1:5], center = TRUE, scale = TRUE))
+
+set.seed(42)
+```
+
+```{r}
+loadPkg("randomForest")
+
+taxi_sample <- sample(2, nrow(taxi_subset), replace=TRUE, prob=c(0.67, 0.33))
+#We then just need to use the new variable to create the test/train outputs, selecting the first four rows as they are the numeric data in the iris data set and we want to predict Species 
+taxi_train <- taxi_subset[taxi_sample==1, 1:5]
+taxi_test <- taxi_subset[taxi_sample==2, 1:5]
+
+rf = randomForest(tip_fare_ratio ~ ., data = taxi_subset) #subset = taxi_train)
+rf
+```
+
+```{r}
+plot(rf)
+```
+
+
+```{r}
+prediction <-predict(rf, taxi_test)
+confusionMatrix(prediction, taxi_test$tip_fare_ratio)
+```

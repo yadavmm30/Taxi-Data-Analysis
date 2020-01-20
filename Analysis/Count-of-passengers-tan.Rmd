@@ -1,0 +1,69 @@
+
+# read data
+
+```{r }
+library(dplyr)
+library(ggplot2)
+unprocessed_data = read.csv("../Data/trips_zones_20000.csv")
+
+
+unprocessed_data['per_tip'] = unprocessed_data['tip_amount'] / unprocessed_data['fare_amount'] 
+
+
+# removing outliers:
+# fare amount in negative & credit card payments
+processed_df <- unprocessed_data %>% filter((fare_amount > 0) & (payment_type == 1) & (passenger_count < 7))
+
+
+summary(processed_df)
+# selected list of columns
+
+
+
+boxplot(processed_df$per_tip, col = c("#0000FF"))
+
+trips_zones <- unprocessed_data[ !unprocessed_data$tip_amount %in% tz_boxplot$out, ]
+
+# filter for credit card payments
+
+credit_trips <-trips_zones %>% filter(payment_type == 1)
+
+hist(processed_df$per_tip)
+hist(credit_trips$fare_amount)
+summary(credit_trips$fare_amount)
+
+qqnorm(processed_df$per_tip)
+qqline(processed_df$per_tip)
+
+
+plot(credit_trips$tip_amount, credit_trips$passenger_count, main="Scatterplot Example", 
+   xlab="tip_amount", ylab="passenger_count", pch=19)
+
+# anova tests 
+anova_tip_amount = aov(tip_amount ~ passenger_count, data = credit_trips)
+
+anova_fare_amount = aov(fare_amount ~ passenger_count, data = credit_trips)
+summary(anova_fare_amount)
+
+processed_df$passenger_count = as.factor(processed_df$passenger_count)
+ggplot(processed_df, aes(y=per_tip,x =passenger_count)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+
+shapiro.test(processed_df$per_tip)
+```
+
+
+
+
+```{r }
+ggplot(data=processed_df, aes(y=per_tip,x =passenger_count)) +
+  geom_bar(stat="identity", color="blue", fill="white")
+
+processed_df %>% group_by(passenger_count) %>% summarise(n = n(), average = mean(per_tip), min = min(per_tip),  max = max(per_tip))
+
+unique(processed_df$VendorID)
+
+install.packages("Nortest")
+
+```

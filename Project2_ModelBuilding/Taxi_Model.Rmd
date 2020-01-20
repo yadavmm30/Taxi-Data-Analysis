@@ -1,0 +1,161 @@
+---
+title: "DATS6101_Project2_Taxi-Analysis"
+author: "Steven Chao, Tanaya Kavathekar, Madhuri Yadav, Amna Gul"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    fig_height: 4.5
+    fig_width: 7
+    highlight: tango
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_float: true
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(error = F)
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(include = T)
+#knitr::opts_chunk$set(warning = F)
+```
+
+```{r basicfcn, include=F}
+# can add quietly=T option to the require() function
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+
+
+# This function calculates number of columns with type integer or double
+count_numeric_columns = function(df) { numericc <- 0
+doublec <- 0
+for (col in colnames(df)){
+  # check type integer
+  if (typeof(df[,col]) == "integer"){
+    numericc = numericc + 1
+  }
+  # check type double
+  else {
+    doublec = doublec + 1
+  }
+}
+# create list of the return variables
+  type_list <- list("num" = numericc, "dbl" = doublec) 
+  return(type_list)
+}
+
+uzscale <- function(df, append=0, excl=NULL) { 
+  #' Standardize dataframe to z scores, safe for non-numeric variables. 
+  #' ELo 201904 GWU DATS
+
+  append = ifelse(append==TRUE || append=="true" || append=="True" || append=="T" || append=="t" || append==1 || append=="1", TRUE, FALSE) # standardize append 
+  nmax = length(df)
+  if (nmax < 1 || !is.numeric(nmax) ) { return(df) }
+  df1 = df
+  onames = colnames(df)  # the original column names
+  cnames = onames  # the new column names, if needed start with the original ones
+  znames = paste("z",cnames, sep="")     # new column names added prefix 'z'. Those are non-numeric will not be used.
+  nadd = ifelse(append, nmax, 0) # add to the column index or replace the orig columns
+  j=1  # counting index
+  for( i in 1:nmax ) {
+    if ( is.numeric(df[,i]) && !( i %in% excl || onames[i] %in% excl ) ) { 
+      df1[,j+nadd] = scale(df[,i])
+      cnames = c(cnames, znames[i])
+      j=j+1
+    } else if ( !append ) { j=j+1
+    } # if append == 1 and (colunm non-numeric or excluded), do not advance j.
+  }
+  if (append) { colnames(df1) <- cnames }
+  return(df1)
+}
+```
+
+```{r load libraries, echo=FALSE}
+# Load libraries
+loadPkg("tree")
+#loadPkg("plyr")
+#loadPkg("dplyr")
+#loadPkg("ggplot2")
+#loadPkg("data.table")
+#loadPkg("nortest")
+#loadPkg("corrplot")
+```
+
+NOTE: USE TAXIDATA_PROCESSED_PROJECT2.CSV DATASET UNDER DATA FOLDER
+
+## STEVEN
+
+```{r dt_subsetfold}
+taxi <- read.csv("../Data/taxidata_processed_project2.csv")
+
+# Subset relevant columns
+taxi_subset <- subset(taxi, select = c(passenger_count, trip_distance, fare_amount, tip_fare_ratio, Borough_pu, Borough_do, pickup_period, drop_period, trip_duration))
+
+#taxi_subset <- subset(taxi, select = c(passenger_count, trip_distance, fare_amount, tip_fare_ratio, trip_duration))
+
+# Scale data
+taxi_subset <- uzscale(taxi_subset)
+
+# Set seed
+set.seed(42)
+
+# Create 10 folds 
+fold <- floor(runif(nrow(taxi_subset),1,11))
+
+# Create column to assign a fold to each row
+taxi_subset$fold <- fold
+```
+
+```{r dt_sets}
+# Create testing set from 1st fold
+test_set <- taxi_subset[taxi_subset$fold == 1,]
+
+# Create training set from 2nd through 10th folds
+train_set <- taxi_subset[taxi_subset$fold != 1,]
+```
+
+```{r dt_growtreelog}
+# Grow decision tree
+taxi_tree_log <- tree(tip_fare_ratio ~ ., data = train_set, mindev=0.001)
+
+# Print results
+summary(taxi_tree_log)
+plot(taxi_tree_log) 
+text(taxi_tree_log, cex = 0.75)
+```
+
+```{r dt_prunetreelogtrain}
+# Return best pruned tree with 5 leaves, evaluating error on training data 
+taxi_tree_log_prune_train <- prune.tree(taxi_tree_log, best = 5)
+
+# Print results
+summary(taxi_tree_log_prune_train)
+plot(taxi_tree_log_prune_train) 
+text(taxi_tree_log_prune_train, cex = 0.75)
+
+# Create sequence of pruned tree sizes/errors
+log_prune_train_seq = prune.tree(taxi_tree_log)
+
+# Plot error versus plot size
+plot(log_prune_train_seq) 
+```
+
+```{r dt_prunetreelogtest}
+# Return best pruned tree with 5 leaves, evaluating error on testing data 
+taxi_tree_log_prune_test <- prune.tree(taxi_tree_log, best = 5, newdata = test_set)
+
+# Print results
+summary(taxi_tree_log_prune_test)
+plot(taxi_tree_log_prune_test) 
+text(taxi_tree_log_prune_test, cex = 0.75)
+
+# Create sequence of pruned tree sizes/errors
+log_prune_test_seq = prune.tree(taxi_tree_log, newdata = test_set)
+
+# Plot error versus plot size
+plot(log_prune_test_seq) 
+```
+
+## END STEVEN

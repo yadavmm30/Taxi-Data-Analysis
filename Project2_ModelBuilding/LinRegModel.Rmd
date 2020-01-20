@@ -1,0 +1,158 @@
+---
+title: "DATS6101_Project1_Taxi-Analysis_Regression"
+author: "Steven Chao, Tanaya Kavathekar, Madhuri Yadav, Amna Gul"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    fig_height: 4.5
+    fig_width: 7
+    highlight: tango
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_float: true
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(error = F)
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(include = F)
+knitr::opts_chunk$set(warning = F)
+```
+
+```{r basicfcn, include=F}
+# can add quietly=T option to the require() function
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+
+
+# This function calculates number of columns with type integer or double
+count_numeric_columns = function(df) { numericc <- 0
+doublec <- 0
+for (col in colnames(df)){
+  # check type integer
+  if (typeof(df[,col]) == "integer"){
+    numericc = numericc + 1
+  }
+  # check type double
+  else {
+    doublec = doublec + 1
+  }
+}
+# create list of the return variables
+  type_list <- list("num" = numericc, "dbl" = doublec) 
+  return(type_list)
+}
+```
+
+```{r load libraries, echo=FALSE}
+# Load libraries
+loadPkg("plyr")
+loadPkg("dplyr")
+loadPkg("ggplot2")
+loadPkg("data.table")
+loadPkg("nortest")
+loadPkg("corrplot")
+loadPkg("faraway")
+```
+
+```{r LinReg, include=TRUE}
+taxipro1 <- read.csv("../Data/taxidata_processed_project2.csv")
+cnames<- c("tip_amount","fare_amount",	"pickup_hrs", "dropoff_hrs",	"trip_duration",	"trip_distance",	"DOLocationID",	"PULocationID",	"tip_fare_ratio")
+taxipro <- taxipro1[cnames]
+str(taxipro)
+head(taxipro)
+summary(taxipro)
+#correaltion
+taxiprocor = cor(taxipro) # get the correlation matrix between all numerical variables.
+taxiprocor
+
+#correlation plot
+corrplot.mixed(taxiprocor,lower.col="black", number.cex = 0.7)
+
+fit0 <- lm(tip_amount ~ fare_amount, data = taxipro )
+summary(fit0)
+vif(fit0)
+plot(fit0)
+
+fit1 <- lm(tip_amount ~ fare_amount+trip_duration, data = taxipro )
+summary(fit1)
+vif(fit1)
+plot(fit1)
+
+fit2 <- lm(tip_fare_ratio ~ fare_amount+trip_duration+trip_distance, data = taxipro )
+summary(fit2)
+vif(fit2)
+plot(fit2)
+
+fit3 <- lm(tip_amount ~ fare_amount+trip_duration+trip_distance+pickup_hrs, data = taxipro )
+summary(fit3)
+vif(fit3)
+plot(fit3)
+
+fit4 <- lm(tip_amount ~ fare_amount+trip_duration+trip_distance+pickup_hrs+PULocationID, data = taxipro )
+summary(fit4)
+vif(fit4)
+plot(fit4)
+
+fit5 <- lm(tip_amount ~ fare_amount+trip_duration+trip_distance+pickup_hrs+PULocationID+dropoff_hrs, data = taxipro )
+summary(fit5)
+vif(fit5)
+plot(fit5)
+```
+
+```{r include=TRUE}
+
+fit6 <- lm(tip_amount ~ trip_duration+trip_distance+pickup_hrs+PULocationID+dropoff_hrs+DOLocationID, data = taxipro )
+summary(fit6)
+vif(fit6)
+plot(fit6)
+
+# for the best model
+
+summary(fit6)
+coef(fit6)
+confint(fit6)
+
+
+
+#Data grid is a function inside the grid package that is a useful tool for creating graphics
+loadPkg("modelr")
+fit6.pred <- add_predictions(taxipro,fit6)
+head(fit6.pred)
+loadPkg("ggplot2")
+ggplot(fit6.pred,aes(tip_fare_ratio,pred))+geom_point(aes(tip_fare_ratio,pred))+geom_line(aes(pred), colour="red", size=1)
+# We can also add the residuals 
+fit6.pred <- add_residuals(fit6.pred,fit6)
+head(fit6.pred)
+ggplot(fit6.pred, aes(resid))+geom_freqpoly(binwidth=.05)
+
+```
+
+We can also use a few simple functions from the broom package
+```{r, include=T}
+loadPkg("broom")
+#tidy will create a dataframe of our results
+tidyfinal <-  tidy(fit6)
+tidyfinal
+#augment will add the model output
+Model_Summary <- augment(fit6)
+str(Model_Summary)
+head(Model_Summary)
+```
+
+
+We learned how to use ANOVA to test mean values (quantitative variable) of different samples. We can actually also use ANOVA to compare linear models:
+```{r modelanova, echo=FALSE}
+anova(fit0,fit1,fit2,fit3,fit4,fit5,fit6)
+```
+
+Predict
+```{r Prediction, echo=TRUE}
+loadPkg("stats")
+# predict(fit6,data.frame(
+#   #midterm=c(25,52,78),hw=c(20,80,45))
+#  )
+```

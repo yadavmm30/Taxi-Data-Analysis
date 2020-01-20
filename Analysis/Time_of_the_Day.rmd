@@ -1,0 +1,63 @@
+---
+title: "Project"
+author: "Madhuri Yadav"
+date: "Sept 22, 2019"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=TRUE, echo=FALSE}
+taxi <- read.csv(file = "trips_zones_20000.csv")
+nrow(taxi)
+taxi<-taxi[taxi$payment_type==1,]
+nrow(taxi)
+str(taxi)
+head(taxi)
+tz_boxplot <- boxplot(taxi$tip_amount, col = c("#0000FF"))
+taxi <- taxi[ ! taxi$tip_amount %in% tz_boxplot$out, ]
+tz_boxplot <- boxplot(taxi$tip_amount, col = c("#0000FF"))
+taxi$tpep_pickup_date <- as.POSIXlt(as.character(taxi$tpep_pickup_datetime), format="%Y-%m-%d %H:%M:%S")
+taxi$tpep_pickup_time <- format(taxi$tpep_pickup_date, format = "%H:%M:%S")
+taxi$tpep_pickup_time1 <- format(strptime(taxi$tpep_pickup_time,"%H:%M:%S"),'%H')
+taxi$tpep_pickup_time2 <- as.numeric(taxi$tpep_pickup_time1)
+taxi$tpep_pickup_time3 <- ifelse(taxi$tpep_pickup_time2 >= 05 & taxi$tpep_pickup_time2 <= 11, "Morning",
+            ifelse(taxi$tpep_pickup_time2 > 11 & taxi$tpep_pickup_time2 <= 16, "Afternoon",
+            ifelse(taxi$tpep_pickup_time2 > 16 & taxi$tpep_pickup_time2 <= 21, "Evening", "Night")))
+taxi$tpep_pickup_time3 <- as.factor(taxi$tpep_pickup_time3)
+taxi$tpep_pickup_time3 <- ordered(taxi$tpep_pickup_time3, levels = c("Morning", "Afternoon", "Evening", "Night"))
+str(taxi)
+boxplot(tip_amount ~ tpep_pickup_time3, data = taxi,col = c("gold","red","orange","dark green"), main = "Tip distribution over time", xlab = "Dat time", ylab = "Tip" )
+barplot(table(taxi$tpep_pickup_time3),col = c('pink'))
+hist(taxi$tip_amount,     main = "Histogram of plasma glucose concentration",    col = c('skyblue'), breaks = seq(0,7,1))
+qqnorm(taxi$tip_amount, main = "Q-Q plot of BMI", col = "pink")
+qqnorm(taxi$tpep_pickup_time2, main = "Q-Q plot of BMI", col = "skyblue")
+
+#shapiro.test(taxi$tip_amount)
+
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x)))
+}
+
+taxi$tip_amount_norm<-normalize(taxi$tip_amount)
+
+ad.test(taxi$tip_amount)
+qqnorm(taxi$tip_amount, main = "Q-Q plot of BMI", col = "pink")
+qqnorm(taxi$tip_amount_norm, main = "Q-Q plot of BMI", col = "pink")
+hist(taxi$tip_amount_norm,     main = "Histogram of plasma glucose concentration",    col = c('skyblue'), breaks = seq(0,1,.1))
+hist(taxi$tip_amount,     main = "Histogram of plasma glucose concentration",    col = c('skyblue'), breaks = seq(0,7,1))
+
+anovaday = aov(tip_amount_norm ~ tpep_pickup_time3, data=taxi)
+anovaday
+names(anovaday)
+summary(anovaday)
+tukeyday <- TukeyHSD(anovaday)
+tukeyday
+plot(tukeyday)
+```
+
